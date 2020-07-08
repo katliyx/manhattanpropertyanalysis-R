@@ -1,0 +1,456 @@
+---
+title: "Final Project"
+author: "Katherine Li"
+date: "12/17/2019"
+output: 
+  tufte::tufte_html: default
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+**Introduction**
+
+New York City is known for being among the most expensive cities in the world to live in, or even to buy real estate. Properties in Manhattan, out of the seven boroughs of NYC have long been, undoubtedly, the most valuable ones. With this rolling sales dataset scraped from NYC Government's Department of Finance, this report aims to do an overall analysis on Manhattan's property sales market.  
+
+**Packages**
+
+```{r}
+
+library(tufte) #theme package
+library(readxl) #to load the data
+library(data.table)
+library(tidyverse)
+library(lubridate)
+library(formattable) #to do data preview
+library(magrittr)
+library(knitr)
+library(modelr)
+library(plotly)
+library(corrplot)
+library(knitr) #to run kable()
+library(pwr)
+
+```
+
+**Data Exploration & Preparation**
+
+Load the Data
+
+```{r}
+
+manhattan <- read_excel("rollingsales_manhattan.xls")
+
+```
+
+Basic Data Exploration
+From dim() function, we could see that this dataset includes 17751 observations, and 21 variables.
+From the names() function, we could get an idea of how the names of variables are stored.
+From the str() function, we could get the data types for the variables included.
+From the summary() function, we could get an idea of the distribution of variables, and also information such as if there is any NA's and would it be a big issue. 
+
+```{r}
+
+dim(manhattan)
+
+names(manhattan)
+
+str(manhattan)
+
+summary(manhattan)
+
+```
+
+Data Cleaning
+1. "Borough" is labeled as "1" throughout this dataset, which means "Manhattan" in New York City, and does not necessarily provide any valuable information for this case. Get rid of this column. As there are NA's throughout the columns named "EASE-MENT" and "Apartment Number". Remove these two columns as well.
+
+```{r}
+
+manhattan <- manhattan %>%
+  select(-BOROUGH, -`EASE-MENT`, -`APARTMENT NUMBER`)
+
+```
+
+2. The column "Building Class Category" has the category number and title merged together in one cell - split this column into two columns as "Building Class Category Num" and "Building Class Category". 
+
+```{r}
+
+manhattan <- manhattan %>%
+  separate(col = "BUILDING CLASS CATEGORY", into = c("BUILDING CLASS CATEGORY NUM", "BUILDING CLASS CATEGORY"), sep = 3)
+
+```
+
+3. Now create a new column called "Building Age" so as to make the variable "Year Built" more useful in future endeavor. 
+
+```{r}
+ 
+manhattan <- manhattan %>%
+  mutate(`BUILDING AGE` = 2019 - `YEAR BUILT`)
+
+```
+
+4. Check and remove duplicates. We could see that 1091 observations are duplicated. Remove them. The resulting dataset contains 16660 observations and 20 variables.
+
+```{r}
+
+# Check.
+manhattan %>% filter(duplicated(manhattan) == TRUE) %>% nrow()
+
+# Remove.
+manhattan <- unique(manhattan)
+
+```
+
+5. Type conversions: "Year built", "Building Class Category", "Building Class Category Num", "Building class at present", "Buidling class at time of sale", "Zip code", "Tax Class at Present", and "Tax Class at time of sale" should be "factor"; "Block", "Lot", and "Zipcode" should be in "chr" format; "Sale Date" should be in "date" format so as to have more practical utility.
+
+```{r}
+
+# Convert to factors. 
+fct <- c(2,3,4,7,9,15,16,17)
+manhattan %<>% mutate_at(fct, funs(as.factor(.)))
+
+# Convert to characters.
+chr <- c(5,6,9)
+manhattan %<>% mutate_at(chr, funs(as.character(.)))
+
+# Convert to date.
+manhattan$`SALE DATE` <- ymd(manhattan$`SALE DATE`)
+
+```
+
+6. As for the missing values, check how many NA's are included in each column at the moment. From the result, we could see that "Tax class at present", "Building class at present", "Zip code", "Year built", and interchangebly, "Building age" contain missing values. Since only five (actually, four) variables contain NA's, leave these here for now.
+
+```{r}
+
+# Check NA's by column. 
+colSums(is.na(manhattan))
+
+```
+
+7. Continue to check if there is any "0" values in the numeric entries. The result of 3348 0's is actually quite a big deal. For sure, the 0's in the price column would have meanings - for example, the "sales deal" would actually be a sort of "transfer deal". However, these zeroes taking up quite a large proportion of all the observations (3348/16660~=20.10%) might skew the dataset in further study. Thus, get rid of these zeroes here; meanwhile, create two separate datasets: one dropping the zero sale price entries, and one keeping them. The "cleaned" version of the dataset to conduct analysis on now contians 13312 observations, which is around 75% of the original dataset - a pretty decent amount. 
+
+```{r}
+
+# Count zeroes in sale price.
+manhattan %>% filter(`SALE PRICE` == 0) %>% nrow()
+
+#Create separate datasets for further study. 
+manhattan_allsp <- manhattan %>% filter(manhattan$`SALE PRICE` == 0)
+
+manhattan_clean <- manhattan %>% filter(!manhattan$`SALE PRICE` == 0)
+
+```
+
+8. For numeric variables "Land square feet" and "gross square feet", I am curious to find out if there is any 0's in it. The result is rather surprising. For definitions of these two terms: gross square feet generally refers to the total square feet of a space, and is often used to calculate the rent. This is an interesting finding. At the moment, I would just leave these two variables like the way they are.  
+
+```{r}
+
+# Check zeroes in land square feet.
+manhattan_clean %>% filter(manhattan_clean$`LAND SQUARE FEET` == 0) %>% nrow()
+
+# Check zeroes in gross square feet.
+manhattan_clean %>% filter(manhattan_clean$`GROSS SQUARE FEET` == 0) %>% nrow()
+
+
+```
+
+9. Plus, for numeric variables "residential units", "commercial units", and "total units" - check if they contain zero values. there are too many zeroes, so no removing would be conducted in this phase for these three variables in case these zeroes would provide insights. 
+
+```{r}
+
+# Check zeroes in land square feet.
+manhattan_clean %>% filter(manhattan_clean$`RESIDENTIAL UNITS` == 0) %>% nrow()
+
+# Check zeroes in gross square feet.
+manhattan_clean %>% filter(manhattan_clean$`COMMERCIAL UNITS` == 0) %>% nrow()
+
+manhattan_clean %>% filter(manhattan_clean$`TOTAL UNITS` == 0) %>% nrow()
+
+```
+
+Data Preview
+
+```{r}
+
+head(manhattan_clean, n = 50) %>%
+  formattable() %>%
+  as.datatable(options = list(dom = 't', scrollX = TRUE, scrollCollapse = TRUE))
+
+```
+
+Final Data Description
+
+```{r}
+
+variable.name <- colnames(manhattan_clean)
+
+variable.type <- lapply(manhattan_clean, class)
+
+variable.description <- c("Name of the neighborhood", "Present tax class (Class 1, 2, 3, or 4)", "Building class category code", "Building class category title", "Sub-division of borough", "Sub-division of block", "Present building class of the property", "Address of the property", "Zip code of the property", "Number of residential units included in the property", "Number of commercial units included in the property", "Number of total units included in the property", "Land area of the property (in Square Feet)", "Total area of the property (in Square Feet)", "The year that the property was built", "Tax class at time of sale (Class 1, 2, 3, or 4)", "Building class of the property at time of sale", "Sale price of the property", "Sale date of the property", "The age of the property")
+
+manhattan_clean_desc <- as_data_frame(cbind(variable.name, variable.type, variable.description))
+colnames(manhattan_clean_desc) <- c("Variable Name","Data Type","Variable Description")
+
+kable(manhattan_clean_desc)
+
+```
+
+**Visualization**
+
+1. Neighborhoods: the most in-demand, the most expensive and the least expensive. 
+
+```{r}
+
+# Most-in-demand neighborhood.
+df11 <- manhattan_clean %>%
+  group_by(NEIGHBORHOOD) %>%
+  summarise(count = n()) %>%
+  arrange(desc(count)) %>%
+  head(10)
+
+p11 <- ggplot(df11, aes(x = `NEIGHBORHOOD`, y = count)) +
+  geom_bar(stat = "identity") +
+  coord_flip() +
+  ggtitle("Most In-Demand Neighborhoods in Manhattan") +
+  theme(legend.position = "bottom") +
+  scale_y_continuous("# of Sales", labels = scales::comma) +
+  scale_x_discrete("Neighborhood")
+
+p11
+
+
+# Most expensive neighborhood.
+df12 <- manhattan_clean %>%
+  group_by(NEIGHBORHOOD) %>%
+  summarise(avgSP = mean(`SALE PRICE`)) %>%
+  arrange(desc(avgSP)) %>%
+  head(10)
+
+
+p12 <- ggplot(df12, aes(x = `NEIGHBORHOOD`, y = avgSP)) +
+  geom_bar(stat = "identity") +
+  coord_flip() +
+  theme(legend.position = "bottom") +
+  ggtitle("Most Expensive Neighborhoods in Manhattan") +
+  scale_y_continuous("Avg. Sales Price", labels = scales::dollar) +
+  scale_x_discrete("Neighborhood") 
+
+p12
+
+
+# Least expensive neighborhood.
+df13 <- manhattan_clean %>%
+  group_by(NEIGHBORHOOD) %>%
+  summarise(avgSP = mean(`SALE PRICE`)) %>%
+  arrange(avgSP) %>%
+  head(10)
+
+p13 <- ggplot(df13, aes(x = `NEIGHBORHOOD`, y = avgSP)) +
+  geom_bar(stat = "identity") +
+  coord_flip() +
+  theme(legend.position = "bottom") +
+  ggtitle("Least Expensive Neighborhoods in Manhattan") +
+  scale_y_continuous("Avg. Sale Price", labels = scales::dollar) +
+  scale_x_discrete("Neighborhood") 
+
+p13
+
+
+```
+
+2. Building Class Category: the most in-demand, the most expensive and the least expensive.
+
+```{r}
+
+# Most-in-demand building class.
+df21 <- manhattan_clean %>%
+  group_by(`BUILDING CLASS CATEGORY`) %>%
+  summarise(count = n()) %>%
+  arrange(desc(count)) %>%
+  head(10)
+
+p11 <- ggplot(df21, aes(x = `BUILDING CLASS CATEGORY`, y = count)) +
+  geom_bar(stat = "identity") +
+  coord_flip() +
+  ggtitle("Most In-Demand Building Categories in Manhattan") +
+  theme(legend.position = "bottom") +
+  scale_y_continuous("# of Sales", labels = scales::comma) +
+  scale_x_discrete("Building Class Category")
+
+p11
+
+
+# Most expensive neighborhood.
+df22 <- manhattan_clean %>%
+  group_by(`BUILDING CLASS CATEGORY`) %>%
+  summarise(avgSP = mean(`SALE PRICE`)) %>%
+  arrange(desc(avgSP)) %>%
+  head(10)
+
+
+p22 <- ggplot(df22, aes(x = `BUILDING CLASS CATEGORY`, y = avgSP)) +
+  geom_bar(stat = "identity") +
+  coord_flip() +
+  theme(legend.position = "bottom") +
+  ggtitle("Most Expensive Buidling Categories in Manhattan") +
+  scale_y_continuous("Avg. Sales Price", labels = scales::dollar) +
+  scale_x_discrete("Building Class Category") 
+
+p22
+
+
+# Least expensive neighborhood.
+df23 <- manhattan_clean %>%
+  group_by(`BUILDING CLASS CATEGORY`) %>%
+  summarise(avgSP = mean(`SALE PRICE`)) %>%
+  arrange(avgSP) %>%
+  head(10)
+
+p23 <- ggplot(df23, aes(x = `BUILDING CLASS CATEGORY`, y = avgSP)) +
+  geom_bar(stat = "identity") +
+  coord_flip() +
+  theme(legend.position = "bottom") +
+  ggtitle("Least Expensive Buidling Categories in Manhattan") +
+  scale_y_continuous("Avg. Sales Price", labels = scales::dollar) +
+  scale_x_discrete("Building Class Category") 
+
+p23
+
+```
+
+3. Building age across Neighborhood.
+
+```{r}
+
+#Oldest
+df31 <- manhattan_clean %>%
+  group_by(`NEIGHBORHOOD`) %>%
+  summarise(avgAge = mean(`BUILDING AGE`)) %>%
+  arrange(desc(avgAge))%>%
+  head(10)
+
+p31 <- ggplot(df31, aes(x = `NEIGHBORHOOD`, y = avgAge)) +
+  geom_bar(stat = "identity") +
+  coord_flip() +
+  theme(legend.position = "bottom") +
+  ggtitle("Oldest Neighborhoods in Manhattan") +
+  scale_y_continuous("Avg. Building Age") +
+  scale_x_discrete("Neighborhood") 
+
+p31
+
+#Youngest
+df32 <- manhattan_clean %>%
+  group_by(`NEIGHBORHOOD`) %>%
+  summarise(avgAge = mean(`BUILDING AGE`)) %>%
+  arrange(avgAge)%>%
+  head(10)
+
+p32 <- ggplot(df32, aes(x = `NEIGHBORHOOD`, y = avgAge)) +
+  geom_bar(stat = "identity") +
+  coord_flip() +
+  theme(legend.position = "bottom") +
+  ggtitle("Youngest Neighborhoods in Manhattan") +
+  scale_y_continuous("Avg. Building Age") +
+  scale_x_discrete("Neighborhood") 
+
+p32
+
+
+```
+
+
+**Analysis**
+
+Preparation.
+First, get rid of the unnecessary variables. Second, transform the sales date to sales month for have a more detailed focus. Third, transform neighborhood to the format of "factor".
+
+```{r}
+
+# Get rid of unnecessary variables. Mostly, character. 
+manhattan_pred <- manhattan_clean[, -c(5, 6, 8, 9)]
+
+# Transfor neighborhood.
+manhattan_pred$NEIGHBORHOOD <- as.factor(manhattan_pred$NEIGHBORHOOD)
+
+# Transfer sale date. 
+manhattan_pred$`SALE DATE` <- as.factor(months(manhattan_pred$`SALE DATE`))
+
+```
+
+1. Does there exist significant difference in sales prices among buildings in different neighborhoods? 
+
+```{r}
+
+mod1 <- aov(`SALE PRICE` ~ `NEIGHBORHOOD`, data = manhattan_pred)
+summary(mod1)
+
+```
+
+2. Does exist significant difference in sales prices between different months of the sale date? 
+
+```{r}
+
+mod2 <- aov(`SALE PRICE` ~ `SALE DATE`, data = manhattan_pred)
+
+summary(mod2)
+
+```
+
+3. Does sale price increases with the gross square feet? With post hoc power analysis.
+
+```{r}
+
+mod3 <- lm(`SALE PRICE` ~ `GROSS SQUARE FEET`, data = manhattan_pred)
+summary(mod3)
+
+#power analysis
+f2value1 = 0.288 / (1-0.288)
+f2value1
+
+fpower1 = pwr.f2.test(u = 1, v = 13310, f2 = f2value1, power = NULL)
+fpower1
+
+```
+
+4. Does sale price increase with the land square feet? With post hoc power analysis. 
+
+```{r}
+
+mod4 <- lm(`SALE PRICE` ~ `LAND SQUARE FEET`, data = manhattan_pred)
+summary(mod4)
+
+#power analysis
+f2value2 = 0.09016 / (1-0.09016)
+f2value2
+
+fpower2 = pwr.f2.test(u = 1, v = 13310, f2 = f2value2, power = NULL)
+fpower2
+
+```
+
+5. Does sale price decrease with the building age? With post hoc power analysis. 
+
+```{r}
+
+mod5 <- lm(`SALE PRICE` ~ `BUILDING AGE`, data = manhattan_pred)
+summary(mod5)
+
+#power analysis
+f2value3 = 0.003055 / (1-0.003055)
+f2value3
+
+fpower3 = pwr.f2.test(u = 1, v = 12921, f2 = f2value3, power = NULL)
+fpower3
+
+```
+
+6. Does there exist significant difference in sales price among different building classes?
+
+```{r}
+
+mod6 <- aov(`SALE PRICE` ~ `BUILDING CLASS CATEGORY`, data = manhattan_pred)
+summary(mod6)
+
+```
